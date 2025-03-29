@@ -982,19 +982,54 @@ class VGGPerceptualLoss(nn.Module):
         y_features = self.feature_extractor(y)
         return self.criterion(x_features, y_features)
 
+class Discriminator64(nn.Module):
+    def __init__(self, in_channels=3):
+        super().__init__()
+        self.model = nn.Sequential(
+            nn.Conv2d(in_channels, 64, 4, stride=2, padding=1),  # 32x32
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(64, 128, 4, stride=2, padding=1),  # 16x16
+            nn.BatchNorm2d(128),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(128, 256, 4, stride=2, padding=1),  # 8x8
+            nn.BatchNorm2d(256),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(256, 512, 4, stride=2, padding=1),  # 4x4
+            nn.BatchNorm2d(512),
+            nn.LeakyReLU(0.2, inplace=True),
+
+            nn.Conv2d(512, 1, 4),  # 1x1
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        return self.model(x).view(-1)
+
+
 # -----------------------------
 # Training functions (unchanged except for dataset usage)
 # -----------------------------
 
 def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
-                      lambda_cls=0.1, lambda_center=0.05, lambda_vgg=0.15,
-                      kl_weight_start=0.0001, kl_weight_end=0.01,
+                      lambda_cls=0.1, lambda_center=0.05, lambda_vgg=0.4, lambda_gan=0.05,
+                      kl_weight_start=0.0001, kl_weight_end=0.02,
                       visualize_every=10, save_dir="./results"):
-    print("Starting VAE training with improved stability and progressive training...")
+    print("Starting VAE-GAN training with perceptual loss enhancement...")
     os.makedirs(save_dir, exist_ok=True)
     device = next(autoencoder.parameters()).device
+
+    # Perceptual loss
     vgg_loss = VGGPerceptualLoss(device)
+
+    # Optimizers
     optimizer = optim.AdamW(autoencoder.parameters(), lr=lr, weight_decay=1e-5, betas=(0.9, 0.999))
+    discriminator = Discriminator64().to(device)
+    d_optimizer = optim.Adam(discriminator.parameters(), lr=1e-4, betas=(0.5, 0.999))
+    gan_criterion = nn.BCELoss()
+
     scheduler = optim.lr_scheduler.OneCycleLR(
         optimizer, max_lr=lr,
         total_steps=num_epochs * len(train_loader),
@@ -1002,26 +1037,40 @@ def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
         div_factor=25,
         final_div_factor=1000
     )
-    loss_history = {'total': [], 'recon': [], 'kl': [], 'class': [], 'center': [], 'perceptual': []}
+
+    loss_history = {'total': [], 'recon': [], 'kl': [], 'class': [], 'center': [], 'perceptual': [], 'gan': []}
     best_loss = float('inf')
     lambda_recon = 1.0
+
     for epoch in range(num_epochs):
         autoencoder.train()
+        discriminator.train()
+
         epoch_recon_loss = 0
         epoch_kl_loss = 0
         epoch_class_loss = 0
         epoch_center_loss = 0
         epoch_perceptual_loss = 0
+        epoch_gan_loss = 0
         epoch_total_loss = 0
-        kl_weight = min(kl_weight_end,
-                        kl_weight_start + (epoch / (num_epochs * 0.6)) * (kl_weight_end - kl_weight_start))
+
+        kl_weight = min(kl_weight_end, kl_weight_start + (epoch / (num_epochs * 0.6)) * (kl_weight_end - kl_weight_start))
         autoencoder.kl_weight = kl_weight
+
         print(f"Epoch {epoch + 1}/{num_epochs} - KL Weight: {kl_weight:.6f}")
+
         for batch_idx, (data, labels) in enumerate(tqdm(train_loader, desc=f"Training")):
             data = data.to(device)
             labels = labels.to(device)
+            valid = torch.ones(data.size(0), device=device)
+            fake = torch.zeros(data.size(0), device=device)
+
             optimizer.zero_grad()
+
+            # Forward pass
             recon_x, mu, logvar, z = autoencoder(data)
+
+            # Loss weights scheduling
             if epoch < 40:
                 kl_factor = 0.0
                 cls_factor = 0.0
@@ -1038,96 +1087,82 @@ def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
                 kl_factor = 1.0
                 cls_factor = 1.0
                 center_factor = min(1.0, (epoch - 60) / 20)
+
+            # Losses
             recon_loss = euclidean_distance_loss(recon_x, data)
             perceptual_loss = vgg_loss(recon_x, data)
-            if kl_factor > 0:
-                kl_loss = autoencoder.kl_divergence(mu, logvar)
-            else:
-                kl_loss = torch.tensor(0.0, device=device)
-            if cls_factor > 0:
-                class_logits = autoencoder.classify(z)
-                class_loss = F.cross_entropy(class_logits, labels)
-            else:
-                class_loss = torch.tensor(0.0, device=device)
-            if center_factor > 0:
-                center_loss = autoencoder.compute_center_loss(z, labels)
-            else:
-                center_loss = torch.tensor(0.0, device=device)
-            recon_scale = 1.0
-            if recon_loss.item() > 1e-8:
-                perceptual_scale = min(1.0, recon_loss.item() / (perceptual_loss.item() + 1e-8))
-                kl_scale = min(1.0, recon_loss.item() / (kl_loss.item() + 1e-8)) if kl_loss.item() > 0 else 1.0
-            else:
-                perceptual_scale = 1.0
-                kl_scale = 1.0
+            kl_loss = autoencoder.kl_divergence(mu, logvar) if kl_factor > 0 else torch.tensor(0.0, device=device)
+            class_loss = F.cross_entropy(autoencoder.classify(z), labels) if cls_factor > 0 else torch.tensor(0.0, device=device)
+            center_loss = autoencoder.compute_center_loss(z, labels) if center_factor > 0 else torch.tensor(0.0, device=device)
+
+            # Discriminator update
+            d_real_loss = gan_criterion(discriminator(data), valid)
+            d_fake_loss = gan_criterion(discriminator(recon_x.detach()), fake)
+            d_loss = (d_real_loss + d_fake_loss) / 2
+            d_optimizer.zero_grad()
+            d_loss.backward()
+            d_optimizer.step()
+
+            # Generator adversarial loss
+            adv_loss = gan_criterion(discriminator(recon_x), valid)
+
+            # Combine all
             total_loss = (
-                    lambda_recon * recon_scale * recon_loss +
-                    lambda_vgg * perceptual_scale * perceptual_loss +
-                    kl_weight * kl_scale * kl_factor * kl_loss +
-                    lambda_cls * cls_factor * class_loss +
-                    lambda_center * center_factor * center_loss
+                lambda_recon * recon_loss +
+                lambda_vgg * perceptual_loss +
+                kl_weight * kl_factor * kl_loss +
+                lambda_cls * cls_factor * class_loss +
+                lambda_center * center_factor * center_loss +
+                lambda_gan * adv_loss
             )
-            if torch.isnan(total_loss) or torch.isinf(total_loss):
-                print(f"WARNING: Invalid loss detected in batch {batch_idx}. Skipping.")
-                continue
+
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(autoencoder.parameters(), max_norm=1.0)
             optimizer.step()
             scheduler.step()
+
             with torch.no_grad():
                 if epoch >= 60 and center_factor > 0:
                     autoencoder.update_centers(z.detach(), labels, momentum=0.9)
+
+            # Logging
             epoch_recon_loss += recon_loss.item()
             epoch_perceptual_loss += perceptual_loss.item()
-            epoch_kl_loss += kl_loss.item() if isinstance(kl_loss, torch.Tensor) else 0
-            epoch_class_loss += class_loss.item() if isinstance(class_loss, torch.Tensor) else 0
-            epoch_center_loss += center_loss.item() if isinstance(center_loss, torch.Tensor) else 0
+            epoch_kl_loss += kl_loss.item()
+            epoch_class_loss += class_loss.item()
+            epoch_center_loss += center_loss.item()
+            epoch_gan_loss += adv_loss.item()
             epoch_total_loss += total_loss.item()
-            if batch_idx % 50 == 0:
-                with torch.no_grad():
-                    effective_kl_weight = kl_weight * kl_scale * kl_factor
-                    effective_cls_weight = lambda_cls * cls_factor
-                    effective_center_weight = lambda_center * center_factor
-                    print(f"Batch {batch_idx}, "
-                          f"Loss weights - Recon: {lambda_recon:.4f}, "
-                          f"Perceptual: {lambda_vgg * perceptual_scale:.4f}, "
-                          f"KL: {effective_kl_weight:.4f}, "
-                          f"Class: {effective_cls_weight:.4f}, "
-                          f"Center: {effective_center_weight:.4f}")
+
+        # Epoch average
         num_batches = len(train_loader)
-        avg_recon_loss = epoch_recon_loss / num_batches
-        avg_perceptual_loss = epoch_perceptual_loss / num_batches
-        avg_kl_loss = epoch_kl_loss / num_batches
-        avg_class_loss = epoch_class_loss / num_batches
-        avg_center_loss = epoch_center_loss / num_batches
-        avg_total_loss = epoch_total_loss / num_batches
-        loss_history['recon'].append(avg_recon_loss)
-        loss_history['perceptual'].append(avg_perceptual_loss)
-        loss_history['kl'].append(avg_kl_loss)
-        loss_history['class'].append(avg_class_loss)
-        loss_history['center'].append(avg_center_loss)
-        loss_history['total'].append(avg_total_loss)
-        print(f"Epoch {epoch + 1}/{num_epochs}, "
-              f"Total Loss: {avg_total_loss:.6f}, "
-              f"Recon Loss: {avg_recon_loss:.6f}, "
-              f"Perceptual Loss: {avg_perceptual_loss:.6f}, "
-              f"KL Loss: {avg_kl_loss:.6f}, "
-              f"Class Loss: {avg_class_loss:.6f}, "
-              f"Center Loss: {avg_center_loss:.6f}")
-        if avg_total_loss < best_loss:
-            best_loss = avg_total_loss
-            torch.save(autoencoder.state_dict(), f"{save_dir}/vae_best.pt")
-            print(f"Saved best model with loss: {best_loss:.6f}")
+        loss_history['recon'].append(epoch_recon_loss / num_batches)
+        loss_history['perceptual'].append(epoch_perceptual_loss / num_batches)
+        loss_history['kl'].append(epoch_kl_loss / num_batches)
+        loss_history['class'].append(epoch_class_loss / num_batches)
+        loss_history['center'].append(epoch_center_loss / num_batches)
+        loss_history['gan'].append(epoch_gan_loss / num_batches)
+        loss_history['total'].append(epoch_total_loss / num_batches)
+
+        print(f"Epoch {epoch + 1}, Total: {loss_history['total'][-1]:.4f}, Recon: {loss_history['recon'][-1]:.4f}, GAN: {loss_history['gan'][-1]:.4f}")
+
+        if loss_history['total'][-1] < best_loss:
+            best_loss = loss_history['total'][-1]
+            torch.save({
+                'autoencoder': autoencoder.state_dict(),
+                'discriminator': discriminator.state_dict(),
+            }, f"{save_dir}/vae_gan_best.pt")
+
         if (epoch + 1) % visualize_every == 0 or epoch == num_epochs - 1:
             visualize_reconstructions(autoencoder, epoch + 1, save_dir)
             visualize_latent_space(autoencoder, epoch + 1, save_dir)
-            torch.save(autoencoder.state_dict(), f"{save_dir}/vae_epoch_{epoch + 1}.pt")
-        if scheduler.get_last_lr()[0] <= 1e-6 and epoch > num_epochs // 2:
-            print(f"Learning rate too small, stopping training at epoch {epoch + 1}")
-            break
-    torch.save(autoencoder.state_dict(), f"{save_dir}/vae_final.pt")
-    print(f"Saved final model after {epoch + 1} epochs")
-    return autoencoder, loss_history
+
+    torch.save({
+        'autoencoder': autoencoder.state_dict(),
+        'discriminator': discriminator.state_dict(),
+    }, f"{save_dir}/vae_gan_final.pt")
+    print("Training complete.")
+    return autoencoder, discriminator, loss_history
 
 def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100, lr=1e-3, visualize_every=10,
                                 save_dir="./results", device=None, start_epoch=0):
@@ -1199,15 +1234,15 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder.eval()
     else:
         print("No existing autoencoder found. Training a new one with improved architecture...")
-        autoencoder, ae_losses = train_autoencoder(
+        autoencoder, ae_losses, _ = train_autoencoder(
             autoencoder,
             train_loader,
             num_epochs=2000,
             lr=1e-4,
-            lambda_cls=0.1,
-            lambda_center=0.1,
-            lambda_vgg=0.1,
-            visualize_every=10,
+            lambda_cls=0.2,
+            lambda_center=0.05,
+            lambda_vgg=0.4,
+            visualize_every=20,
             save_dir=results_dir
         )
         torch.save(autoencoder.state_dict(), autoencoder_path)
@@ -1317,3 +1352,4 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
+
