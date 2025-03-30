@@ -533,7 +533,7 @@ class ConditionalUNet(nn.Module):
 
         self.residual_weight = nn.Parameter(torch.tensor(0.1))
 
-    def forward(self, x, t, c=None, res_scale=1.0):
+    def forward(self, x, t, c=None):
         residual = x
         t_emb_base = self.time_emb(t)
         c_emb_base = self.class_emb(c) if c is not None else None
@@ -548,9 +548,9 @@ class ConditionalUNet(nn.Module):
             h = block(h)
             h = h + h_residual
             h_norm = layer_norm(h)
-            h_attn = h_norm.unsqueeze(1)
+            h_attn = h_norm.unsqueeze(0)
             h_attn, _ = self.attention_layers[i](h_attn, h_attn, h_attn)
-            h = h + h_attn.squeeze(1)
+            h = h + h_attn.squeeze(0)
             h = downsample(h)
         t_emb_final = self.final_time_proj(t_emb_base)
         h = h + t_emb_final
@@ -582,8 +582,8 @@ class ConditionalDenoiseDiffusion():
         if not isinstance(t, torch.Tensor):
             t = torch.tensor([t], device=xt.device)
         eps_theta = self.eps_model(xt, t, c)
-        alpha_t = self.alpha[t].reshape(-1, 1)
-        alpha_bar_t = self.alpha_bar[t].reshape(-1, 1)
+        alpha_t = self.alpha[t].reshape(-1, 1).to(xt.device)
+        alpha_bar_t = self.alpha_bar[t].reshape(-1, 1).to(xt.device)
         mean = (xt - ((1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)) * eps_theta) / torch.sqrt(alpha_t)
         var = self.beta[t].reshape(-1, 1)
         if t[0] > 0:
@@ -598,12 +598,13 @@ class ConditionalDenoiseDiffusion():
             x = self.p_sample(x, t, c)
         return x
 
-    def loss(self, x0, labels=None, res_scale=1.0):
+    def loss(self, x0, labels=None):
         batch_size = x0.shape[0]
         t = torch.randint(0, self.n_steps, (batch_size,), device=x0.device, dtype=torch.long)
         eps = torch.randn_like(x0)
         xt = self.q_sample(x0, t, eps)
-        eps_theta = self.eps_model(xt, t, labels, res_scale=res_scale)
+        eps_theta = self.eps_model(xt, t, labels)
+
         return euclidean_distance_loss(eps, eps_theta)
 
 # -----------------------------
@@ -893,6 +894,7 @@ def create_diffusion_animation(autoencoder, diffusion, class_idx, num_frames=50,
             raise ValueError(f"Invalid class name: {class_idx}. Must be one of {class_names}")
     if temp_dir is None:
         temp_dir = os.path.join('./temp_frames', f'class_{class_idx}_{seed}')
+    os.makedirs('./temp_frames', exist_ok=True)
     os.makedirs(temp_dir, exist_ok=True)
     if save_path is None:
         save_dir = './results'
@@ -957,11 +959,6 @@ def create_diffusion_animation(autoencoder, diffusion, class_idx, num_frames=50,
         pass
     print(f"Animation saved to {save_path}")
     return save_path
-
-def compute_res_scale(epoch, total_epochs, initial=1.0, final=1.0):
-    if epoch <= 20:
-        return 0.1
-    return initial + (final - initial) * (epoch / total_epochs)
 
 class VGGPerceptualLoss(nn.Module):
     def __init__(self, device):
@@ -1206,7 +1203,6 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
     loss_history = []
     for epoch in range(start_epoch, start_epoch + num_epochs):
-        current_res_scale = compute_res_scale(epoch, start_epoch + num_epochs, initial=0.15, final=0.3)
         epoch_loss = 0
         for batch_idx, (data, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{start_epoch + num_epochs}")):
             data = data.to(device)
@@ -1214,7 +1210,7 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
             with torch.no_grad():
                 mu, logvar = autoencoder.encode_with_params(data)
                 z = autoencoder.reparameterize(mu, logvar)
-            loss = diffusion.loss(z, labels, res_scale=current_res_scale)
+            loss = diffusion.loss(z, labels)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(unet.parameters(), max_norm=1.0)
