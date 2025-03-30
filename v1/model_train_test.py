@@ -1202,6 +1202,38 @@ def check_and_normalize_latent(autoencoder, data):
     return z_normalized, mean, std
 
 
+def visualize_latent_comparison(autoencoder, diffusion, data_loader, save_path):
+    device = next(autoencoder.parameters()).device
+    autoencoder.eval()
+    diffusion.eps_model.eval()
+
+    images, labels = next(iter(data_loader))
+    images = images.to(device)
+
+    with torch.no_grad():
+        mu, logvar = autoencoder.encode_with_params(images)
+        z = autoencoder.reparameterize(mu, logvar)
+        recon = autoencoder.decode(z)
+
+        latent_shape = (images.size(0), autoencoder.latent_dim)
+        z_denoised = diffusion.sample(latent_shape, device, c=labels)
+        gen = autoencoder.decode(z_denoised)
+
+    n = images.size(0)
+    fig, axes = plt.subplots(2, n, figsize=(n * 2, 4))
+    for i in range(n):
+        axes[0, i].imshow(recon[i].cpu().permute(1, 2, 0).numpy())
+        axes[0, i].axis("off")
+        axes[1, i].imshow(gen[i].cpu().permute(1, 2, 0).numpy())
+        axes[1, i].axis("off")
+    axes[0, 0].set_title("VAE reconstruction（actual latent）", fontsize=10)
+    axes[1, 0].set_title("diffusion（denoised latent）", fontsize=10)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    autoencoder.train()
+    diffusion.eps_model.train()
+
 def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100, lr=1e-3, visualize_every=10,
                                 save_dir="./results", device=None, start_epoch=0):
     print("Starting Class-Conditional Diffusion Model training with improved strategies...")
@@ -1211,6 +1243,8 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
     optimizer = torch.optim.AdamW(unet.parameters(), lr=lr, weight_decay=1e-5, betas=(0.9, 0.999))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
     loss_history = []
+    visualization_loader = train_loader
+    
     for epoch in range(start_epoch, start_epoch + num_epochs):
         epoch_loss = 0
         for batch_idx, (data, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{start_epoch + num_epochs}")):
@@ -1231,7 +1265,9 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         print(f"Epoch {epoch + 1}/{start_epoch + num_epochs}, Average Loss: {avg_loss:.6f}")
         scheduler.step()
         if (epoch + 1) % visualize_every == 0 or epoch == start_epoch + num_epochs - 1:
-            # For visualization, only iterate over a subset of classes (first 10)
+            latent_save_path = os.path.join(save_dir, f"latent_comparison_epoch_{epoch + 1}.png")
+            visualize_latent_comparison(autoencoder, diffusion, visualization_loader, latent_save_path)
+            # For visualization, only iterate over a subset of classes (first 2)
             for class_idx in range(min(len(class_names), 2)):
                 create_diffusion_animation(autoencoder, diffusion, class_idx=class_idx, num_frames=50,
                                            save_path=f"{save_dir}/diffusion_animation_class_{class_names[class_idx]}_epoch_{epoch + 1}.gif")
