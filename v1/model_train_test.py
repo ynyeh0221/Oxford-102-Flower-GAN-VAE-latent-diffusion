@@ -559,7 +559,7 @@ class ConditionalUNet(nn.Module):
             h = h + c_emb_final
         h = self.final_norm(h)
         out = self.final(h)
-        return out + torch.sigmoid(self.residual_weight) * self.final(residual)
+        return out
 
 # Class-conditional diffusion model
 class ConditionalDenoiseDiffusion():
@@ -1193,6 +1193,15 @@ def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
     print("Training complete.")
     return autoencoder, discriminator, loss_history
 
+def check_and_normalize_latent(autoencoder, data):
+    mu, logvar = autoencoder.encode_with_params(data)
+    z = autoencoder.reparameterize(mu, logvar)
+    mean = z.mean(dim=0, keepdim=True)
+    std = z.std(dim=0, keepdim=True)
+    z_normalized = (z - mean) / (std + 1e-8)
+    return z_normalized, mean, std
+
+
 def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100, lr=1e-3, visualize_every=10,
                                 save_dir="./results", device=None, start_epoch=0):
     print("Starting Class-Conditional Diffusion Model training with improved strategies...")
@@ -1208,8 +1217,9 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
             data = data.to(device)
             labels = labels.to(device)
             with torch.no_grad():
-                mu, logvar = autoencoder.encode_with_params(data)
-                z = autoencoder.reparameterize(mu, logvar)
+                # mu, logvar = autoencoder.encode_with_params(data)
+                # z = autoencoder.reparameterize(mu, logvar)
+                z, batch_mean, batch_std = check_and_normalize_latent(autoencoder, data)
             loss = diffusion.loss(z, labels)
             optimizer.zero_grad()
             loss.backward()
