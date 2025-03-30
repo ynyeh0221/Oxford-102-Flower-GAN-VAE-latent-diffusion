@@ -958,7 +958,7 @@ def create_diffusion_animation(autoencoder, diffusion, class_idx, num_frames=50,
 
 def compute_res_scale(epoch, total_epochs, initial=5.0, final=1.0):
     if epoch <= 20:
-        return 0.05
+        return 0.1
     return initial + (final - initial) * (epoch / total_epochs)
 
 class VGGPerceptualLoss(nn.Module):
@@ -1204,7 +1204,7 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
     loss_history = []
     for epoch in range(start_epoch, start_epoch + num_epochs):
-        current_res_scale = compute_res_scale(epoch, start_epoch + num_epochs, initial=0.5, final=1)
+        current_res_scale = compute_res_scale(epoch, start_epoch + num_epochs, initial=0.15, final=0.3)
         epoch_loss = 0
         for batch_idx, (data, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{start_epoch + num_epochs}")):
             data = data.to(device)
@@ -1224,7 +1224,7 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         scheduler.step()
         if (epoch + 1) % visualize_every == 0 or epoch == start_epoch + num_epochs - 1:
             # For visualization, only iterate over a subset of classes (first 10)
-            for class_idx in range(min(len(class_names), 10)):
+            for class_idx in range(min(len(class_names), 2)):
                 create_diffusion_animation(autoencoder, diffusion, class_idx=class_idx, num_frames=50,
                                            save_path=f"{save_dir}/diffusion_animation_class_{class_names[class_idx]}_epoch_{epoch + 1}.gif")
                 save_path = f"{save_dir}/sample_class_{class_names[class_idx]}_epoch_{epoch + 1}.png"
@@ -1324,7 +1324,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     if 'diffusion' not in globals():
         conditional_unet, diffusion, diff_losses = train_conditional_diffusion(
             autoencoder, conditional_unet, train_loader, num_epochs=remaining_epochs, lr=1e-3,
-            visualize_every=10,
+            visualize_every=50,
             save_dir=results_dir,
             device=device,
             start_epoch=start_epoch
@@ -1341,7 +1341,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     elif start_epoch > 0:
         conditional_unet, diffusion, diff_losses = train_conditional_diffusion(
             autoencoder, conditional_unet, train_loader, num_epochs=remaining_epochs, lr=1e-3,
-            visualize_every=10,
+            visualize_every=50,
             save_dir=results_dir,
             device=device,
             start_epoch=start_epoch
@@ -1382,3 +1382,4 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
+
