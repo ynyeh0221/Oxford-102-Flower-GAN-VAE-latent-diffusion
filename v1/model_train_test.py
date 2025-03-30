@@ -1014,7 +1014,7 @@ class Discriminator64(nn.Module):
 # -----------------------------
 
 def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
-                      lambda_cls=0.1, lambda_center=0.05, lambda_vgg=0.4, lambda_gan=0.05,
+                      lambda_cls=0.1, lambda_center=0.05, lambda_vgg=0.4, lambda_gan=0.2,
                       kl_weight_start=0.0001, kl_weight_end=0.02,
                       visualize_every=10, save_dir="./results"):
     print("Starting VAE-GAN training with perceptual loss enhancement...")
@@ -1106,14 +1106,24 @@ def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
             # Generator adversarial loss
             adv_loss = gan_criterion(discriminator(recon_x), valid)
 
+            recon_scale = 1.0
+            if recon_loss.item() > 1e-8:
+                perceptual_scale = min(1.0, recon_loss.item() / (perceptual_loss.item() + 1e-8))
+                kl_scale = min(1.0, recon_loss.item() / (kl_loss.item() + 1e-8)) if kl_loss.item() > 0 else 1.0
+                gan_scale = min(1.0, recon_loss.item() / (adv_loss.item() + 1e-8))
+            else:
+                perceptual_scale = 1.0
+                kl_scale = 1.0
+                gan_scale = 1.0
+
             # Combine all
             total_loss = (
-                lambda_recon * recon_loss +
-                lambda_vgg * perceptual_loss +
-                kl_weight * kl_factor * kl_loss +
+                lambda_recon * recon_scale * recon_loss +
+                lambda_vgg * perceptual_scale * perceptual_loss +
+                kl_weight * kl_scale * kl_factor * kl_loss +
                 lambda_cls * cls_factor * class_loss +
                 lambda_center * center_factor * center_loss +
-                lambda_gan * adv_loss
+                lambda_gan * gan_scale * adv_loss
             )
 
             total_loss.backward()
@@ -1128,23 +1138,43 @@ def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
             # Logging
             epoch_recon_loss += recon_loss.item()
             epoch_perceptual_loss += perceptual_loss.item()
-            epoch_kl_loss += kl_loss.item()
-            epoch_class_loss += class_loss.item()
-            epoch_center_loss += center_loss.item()
-            epoch_gan_loss += adv_loss.item()
+            epoch_kl_loss += kl_loss.item() if isinstance(kl_loss, torch.Tensor) else 0
+            epoch_class_loss += class_loss.item() if isinstance(class_loss, torch.Tensor) else 0
+            epoch_center_loss += center_loss.item() if isinstance(center_loss, torch.Tensor) else 0
             epoch_total_loss += total_loss.item()
+            epoch_gan_loss += adv_loss.item()
 
         # Epoch average
         num_batches = len(train_loader)
-        loss_history['recon'].append(epoch_recon_loss / num_batches)
-        loss_history['perceptual'].append(epoch_perceptual_loss / num_batches)
-        loss_history['kl'].append(epoch_kl_loss / num_batches)
-        loss_history['class'].append(epoch_class_loss / num_batches)
-        loss_history['center'].append(epoch_center_loss / num_batches)
-        loss_history['gan'].append(epoch_gan_loss / num_batches)
-        loss_history['total'].append(epoch_total_loss / num_batches)
+        avg_recon_loss = epoch_recon_loss / num_batches
+        avg_perceptual_loss = epoch_perceptual_loss / num_batches
+        avg_kl_loss = epoch_kl_loss / num_batches
+        avg_class_loss = epoch_class_loss / num_batches
+        avg_center_loss = epoch_center_loss / num_batches
+        avg_total_loss = epoch_total_loss / num_batches
+        avg_gan_loss = epoch_gan_loss / num_batches
+        loss_history['recon'].append(avg_recon_loss)
+        loss_history['perceptual'].append(avg_perceptual_loss)
+        loss_history['kl'].append(avg_kl_loss)
+        loss_history['class'].append(avg_class_loss)
+        loss_history['center'].append(avg_center_loss)
+        loss_history['total'].append(avg_total_loss)
+        loss_history['gan'].append(avg_gan_loss)
 
-        print(f"Epoch {epoch + 1}, Total: {loss_history['total'][-1]:.4f}, Recon: {loss_history['recon'][-1]:.4f}, GAN: {loss_history['gan'][-1]:.4f}")
+        print(f"Epoch {epoch + 1}/{num_epochs}, "
+              f"Recon Lambda * Scale: {lambda_recon * recon_scale:.6f}, "
+              f"Perceptual Lambda * Scale: {lambda_vgg * perceptual_scale:.6f}, "
+              f"KL Lambda * Scale: {kl_factor * kl_weight:.6f}, "
+              f"GAN Lambda * Scale: {gan_scale * lambda_gan:.6f}")
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, "
+              f"Total Loss: {avg_total_loss:.6f}, "
+              f"Recon Loss: {avg_recon_loss:.6f}, "
+              f"Perceptual Loss: {avg_perceptual_loss:.6f}, "
+              f"KL Loss: {avg_kl_loss:.6f}, "
+              f"GAN Loss: {avg_gan_loss:.6f}, "
+              f"Class Loss: {avg_class_loss:.6f}, "
+              f"Center Loss: {avg_center_loss:.6f}")
 
         if loss_history['total'][-1] < best_loss:
             best_loss = loss_history['total'][-1]
@@ -1237,10 +1267,10 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder, ae_losses, _ = train_autoencoder(
             autoencoder,
             train_loader,
-            num_epochs=2000,
+            num_epochs=3000,
             lr=1e-4,
-            lambda_cls=0.2,
-            lambda_center=0.05,
+            lambda_cls=0.3,
+            lambda_center=0.1,
             lambda_vgg=0.4,
             visualize_every=20,
             save_dir=results_dir
@@ -1352,4 +1382,3 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
-
