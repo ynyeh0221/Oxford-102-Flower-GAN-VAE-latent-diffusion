@@ -531,6 +531,8 @@ class ConditionalUNet(nn.Module):
         self.final_norm = nn.LayerNorm(hidden_dims[-1])
         self.final = nn.Linear(hidden_dims[-1], latent_dim)
 
+        self.residual_weight = nn.Parameter(torch.tensor(0.1))
+
     def forward(self, x, t, c=None, res_scale=1.0):
         residual = x
         t_emb_base = self.time_emb(t)
@@ -557,7 +559,7 @@ class ConditionalUNet(nn.Module):
             h = h + c_emb_final
         h = self.final_norm(h)
         out = self.final(h)
-        return (out + res_scale * self.final(residual)) / (1 + res_scale)
+        return out + torch.sigmoid(self.residual_weight) * self.final(residual)
 
 # Class-conditional diffusion model
 class ConditionalDenoiseDiffusion():
@@ -582,7 +584,7 @@ class ConditionalDenoiseDiffusion():
         eps_theta = self.eps_model(xt, t, c)
         alpha_t = self.alpha[t].reshape(-1, 1)
         alpha_bar_t = self.alpha_bar[t].reshape(-1, 1)
-        mean = (xt - (1 - alpha_t) / torch.sqrt(1 - alpha_bar_t) * eps_theta) / torch.sqrt(alpha_t)
+        mean = (xt - ((1 - alpha_t) / torch.sqrt(1 - alpha_bar_t)) * eps_theta) / torch.sqrt(alpha_t)
         var = self.beta[t].reshape(-1, 1)
         if t[0] > 0:
             noise = torch.randn_like(xt)
@@ -956,7 +958,7 @@ def create_diffusion_animation(autoencoder, diffusion, class_idx, num_frames=50,
     print(f"Animation saved to {save_path}")
     return save_path
 
-def compute_res_scale(epoch, total_epochs, initial=5.0, final=1.0):
+def compute_res_scale(epoch, total_epochs, initial=1.0, final=1.0):
     if epoch <= 20:
         return 0.1
     return initial + (final - initial) * (epoch / total_epochs)
@@ -1382,4 +1384,3 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
-
