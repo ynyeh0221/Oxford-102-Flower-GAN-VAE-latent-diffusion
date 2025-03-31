@@ -303,10 +303,9 @@ def euclidean_distance_loss(x, y, reduction='mean'):
 
 # SimpleAutoencoder with modifications for 102 classes
 class SimpleAutoencoder(nn.Module):
-    def __init__(self, in_channels=3, latent_dim=256, num_classes=102, kl_weight=0.0005):
+    def __init__(self, in_channels=3, latent_dim=256, num_classes=102):
         super().__init__()
         self.latent_dim = latent_dim
-        self.kl_weight = kl_weight
         self.encoder = Encoder(in_channels, latent_dim)
         self.decoder = Decoder(latent_dim, in_channels)
         self.classifier = nn.Sequential(
@@ -1014,7 +1013,7 @@ class Discriminator64(nn.Module):
 
 def train_autoencoder(autoencoder, train_loader, num_epochs=300, lr=1e-4,
                       lambda_cls=0.1, lambda_center=0.05, lambda_vgg=0.4, lambda_gan=0.2,
-                      kl_weight_start=0.0001, kl_weight_end=0.02,
+                      kl_weight_start=0.001, kl_weight_end=0.05,
                       visualize_every=10, save_dir="./results"):
     print("Starting VAE-GAN training with perceptual loss enhancement...")
     os.makedirs(save_dir, exist_ok=True)
@@ -1209,6 +1208,7 @@ def visualize_latent_comparison(autoencoder, diffusion, data_loader, save_path):
 
     images, labels = next(iter(data_loader))
     images = images.to(device)
+    labels = labels.to(device)
 
     with torch.no_grad():
         mu, logvar = autoencoder.encode_with_params(images)
@@ -1220,19 +1220,23 @@ def visualize_latent_comparison(autoencoder, diffusion, data_loader, save_path):
         gen = autoencoder.decode(z_denoised)
 
     n = images.size(0)
-    fig, axes = plt.subplots(2, n, figsize=(n * 2, 4))
+    fig, axes = plt.subplots(3, n, figsize=(n * 2, 6))
     for i in range(n):
         axes[0, i].imshow(recon[i].cpu().permute(1, 2, 0).numpy())
         axes[0, i].axis("off")
         axes[1, i].imshow(gen[i].cpu().permute(1, 2, 0).numpy())
         axes[1, i].axis("off")
+        axes[2, i].imshow(images[i].cpu().permute(1, 2, 0).numpy())
+        axes[2, i].axis("off")
     axes[0, 0].set_title("VAE reconstruction（actual latent）", fontsize=10)
-    axes[1, 0].set_title("diffusion（denoised latent）", fontsize=10)
+    axes[1, 0].set_title("Diffusion（denoised latent）", fontsize=10)
+    axes[2, 0].set_title("Original", fontsize=10)
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
     autoencoder.train()
     diffusion.eps_model.train()
+
 
 def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100, lr=1e-3, visualize_every=10,
                                 save_dir="./results", device=None, start_epoch=0):
@@ -1244,7 +1248,7 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
     scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10, T_mult=2)
     loss_history = []
     visualization_loader = train_loader
-    
+
     for epoch in range(start_epoch, start_epoch + num_epochs):
         epoch_loss = 0
         for batch_idx, (data, labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{start_epoch + num_epochs}")):
@@ -1301,7 +1305,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     autoencoder_path = f"{results_dir}/flowers_autoencoder.pt"
     diffusion_path = f"{results_dir}/conditional_diffusion_final.pt"
     # Create autoencoder with 102 classes
-    autoencoder = SimpleAutoencoder(in_channels=3, latent_dim=256, num_classes=102, kl_weight=0.0005).to(device)
+    autoencoder = SimpleAutoencoder(in_channels=3, latent_dim=256, num_classes=102).to(device)
     if os.path.exists(autoencoder_path):
         print(f"Loading existing autoencoder from {autoencoder_path}")
         autoencoder.load_state_dict(torch.load(autoencoder_path, map_location=device), strict=False)
@@ -1311,12 +1315,12 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder, ae_losses, _ = train_autoencoder(
             autoencoder,
             train_loader,
-            num_epochs=3000,
+            num_epochs=1200,
             lr=1e-4,
             lambda_cls=0.3,
             lambda_center=0.1,
             lambda_vgg=0.4,
-            visualize_every=20,
+            visualize_every=300,
             save_dir=results_dir
         )
         torch.save(autoencoder.state_dict(), autoencoder_path)
@@ -1368,7 +1372,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     if 'diffusion' not in globals():
         conditional_unet, diffusion, diff_losses = train_conditional_diffusion(
             autoencoder, conditional_unet, train_loader, num_epochs=remaining_epochs, lr=1e-3,
-            visualize_every=50,
+            visualize_every=1,
             save_dir=results_dir,
             device=device,
             start_epoch=start_epoch
