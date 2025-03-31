@@ -2,8 +2,6 @@
 
 A class-conditional generative modeling framework combining Variational Autoencoders (VAE) and Denoising Diffusion Probabilistic Models (DDPM), developed for the Oxford 102 Flowers dataset. This project integrates advanced components such as attention mechanisms, center loss regularization, VGG perceptual loss, and adversarial training to enable high-fidelity image generation and structured latent representation.
 
----
-
 ## Features
 
 ### VAE with Enhanced Architecture
@@ -30,14 +28,10 @@ A class-conditional generative modeling framework combining Variational Autoenco
 - Animated GIFs of the denoising process
 - Class-wise sample grids for visual inspection
 
----
-
 ## Dataset
 
 - **Oxford 102 Flowers** dataset: 102 flower categories with segmented images.
 - Automatically downloaded via `torchvision.datasets.Flowers102`.
-
----
 
 ## Training
 
@@ -57,8 +51,6 @@ python main.py --checkpoint_path ./results/conditional_diffusion_epoch_600.pt --
 
 Trains a transformer-inspired UNet operating in latent space to denoise class-conditioned samples.
 
----
-
 ## Output
 
 - `vae_gan_best.pt`, `conditional_diffusion_final.pt`: Model checkpoints
@@ -67,15 +59,11 @@ Trains a transformer-inspired UNet operating in latent space to denoise class-co
 - `diffusion_animation_<class>.gif`: Animated denoising per class
 - `denoising_path_<class>.png`: Latent space path during generation
 
----
-
 ## Getting Started
 
 1. Clone this repo and install dependencies (PyTorch, torchvision, scikit-learn, imageio, etc.).
 2. Run `main.py` to train or resume training.
 3. Visualizations and outputs are saved under `./results`.
-
----
 
 ## Requirements
 
@@ -86,5 +74,3 @@ Trains a transformer-inspired UNet operating in latent space to denoise class-co
 - matplotlib
 - tqdm
 - imageio
-
----
