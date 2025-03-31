@@ -1,4 +1,4 @@
-# Flower-VAE-Diffusion
+# Flower-GAN-VAE-Diffusion
 
 A class-conditional generative modeling framework combining Variational Autoencoders (VAE) and Denoising Diffusion Probabilistic Models (DDPM), developed for the Oxford 102 Flowers dataset. This project integrates advanced components such as attention mechanisms, center loss regularization, VGG perceptual loss, and adversarial training to enable high-fidelity image generation and structured latent representation.
 
