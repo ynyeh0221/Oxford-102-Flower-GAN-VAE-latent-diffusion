@@ -815,7 +815,7 @@ def visualize_reconstructions(autoencoder, epoch, save_dir="./results"):
         axes[1, i].set_title('Reconstruction')
         axes[1, i].axis('off')
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/vae_reconstruction_epoch_{epoch}.png")
+    plt.savefig(f"{save_dir}/test_vae_reconstruction_epoch_{epoch}.png")
     plt.close()
     autoencoder.train()
 
@@ -1255,9 +1255,8 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
             data = data.to(device)
             labels = labels.to(device)
             with torch.no_grad():
-                # mu, logvar = autoencoder.encode_with_params(data)
-                # z = autoencoder.reparameterize(mu, logvar)
-                z, batch_mean, batch_std = check_and_normalize_latent(autoencoder, data)
+                mu, logvar = autoencoder.encode_with_params(data)
+                z = autoencoder.reparameterize(mu, logvar)
             loss = diffusion.loss(z, labels)
             optimizer.zero_grad()
             loss.backward()
@@ -1308,7 +1307,8 @@ def main(checkpoint_path=None, total_epochs=2000):
     autoencoder = SimpleAutoencoder(in_channels=3, latent_dim=256, num_classes=102).to(device)
     if os.path.exists(autoencoder_path):
         print(f"Loading existing autoencoder from {autoencoder_path}")
-        autoencoder.load_state_dict(torch.load(autoencoder_path, map_location=device), strict=False)
+        checkpoint = torch.load(autoencoder_path, map_location=device)
+        autoencoder.load_state_dict(checkpoint['autoencoder'], strict=False)
         autoencoder.eval()
     else:
         print("No existing autoencoder found. Training a new one with improved architecture...")
@@ -1430,3 +1430,4 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
+
