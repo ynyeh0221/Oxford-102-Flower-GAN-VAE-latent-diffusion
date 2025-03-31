@@ -2,8 +2,6 @@
 
 This repository implements a **class-conditional diffusion model** in the latent space of a **Variational Autoencoder (VAE)** for the **Oxford Flowers 102** dataset. It integrates a VAE-GAN architecture enhanced with perceptual and center losses, and a custom diffusion model trained to denoise latent vectors conditioned on class labels.
 
----
-
 ## Features
 
 - **Custom VAE architecture** with:
@@ -21,13 +19,9 @@ This repository implements a **class-conditional diffusion model** in the latent
   - Denoising path tracking
   - Sample grids and GIF animations
 
----
-
 ## Dataset
 
 This project uses the [Oxford 102 Flowers](https://www.robots.ox.ac.uk/~vgg/data/flowers/102/index.html) dataset, automatically downloaded via `torchvision.datasets.Flowers102`.
-
----
 
 ## Architecture Overview
 
@@ -40,8 +34,6 @@ This project uses the [Oxford 102 Flowers](https://www.robots.ox.ac.uk/~vgg/data
   - Conditional UNet-like architecture adapted for 1D latent vectors
   - Time and class embeddings injected at each layer
   - Trained using standard denoising score matching
-
----
 
 ## Training
 
@@ -61,15 +53,11 @@ If no existing checkpoints are found, this will train the VAE from scratch and s
 
 After training the VAE, the diffusion model will be trained on latent vectors. Progress is visualized via sample images and latent path diagrams.
 
----
-
 ## Checkpoints
 
 - `flowers_autoencoder.pt`: Trained VAE model
 - `conditional_diffusion_final.pt`: Final trained diffusion model
 - Intermediate checkpoints are saved during training
-
----
 
 ## Visualizations
 
@@ -89,8 +77,6 @@ Visual assets are saved in the results directory:
 | Denoising Process | ![Denoising Class 0](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v1/output/diffusion_path/denoising_path_0_epoch_1500.png)![Denoising Class 1](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v1/output/diffusion_path/denoising_path_1_epoch_1500.png) | Visualization of cat generation process and latent path |
 | Animation | ![Class 0 Animation](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v1/output/diffusion_animation_class_0_epoch_1550.gif)![Class 1 Animation](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v1/output/diffusion_animation_class_1_epoch_1550.gif) | Animation of the denoising process for cat generation |
 
----
-
 ## Dependencies
 
 Ensure the following libraries are installed:
@@ -105,8 +91,6 @@ Optional for faster t-SNE:
 pip install openTSNE
 ```
 
----
-
 ## File Structure
 
 - `main.py`: Entry point for training
@@ -114,12 +98,8 @@ pip install openTSNE
 - `train_conditional_diffusion(...)`: Trains the conditional diffusion model
 - `visualize_*.py`: Functions to visualize reconstructions, latent spaces, denoising, etc.
 
----
-
 ## Notes
 
 - Trains on 64×64 resized images for speed and memory efficiency
 - You can resume training from a specific epoch by providing a checkpoint
 - Designed to run on GPU (`cuda` or `mps`); falls back to CPU if unavailable
-
----
