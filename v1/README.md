@@ -1,8 +1,4 @@
-Sure! Here's a clean and comprehensive `README.md` for your project:
-
----
-
-# Class-Conditional Diffusion with VAE for Oxford Flowers 102
+# Class-Conditional Diffusion with GAN VAE for Oxford Flowers 102
 
 This repository implements a **class-conditional diffusion model** in the latent space of a **Variational Autoencoder (VAE)** for the **Oxford Flowers 102** dataset. It integrates a VAE-GAN architecture enhanced with perceptual and center losses, and a custom diffusion model trained to denoise latent vectors conditioned on class labels.
 
