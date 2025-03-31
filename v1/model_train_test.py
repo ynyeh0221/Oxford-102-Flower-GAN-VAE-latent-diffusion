@@ -1268,8 +1268,8 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         print(f"Epoch {epoch + 1}/{start_epoch + num_epochs}, Average Loss: {avg_loss:.6f}")
         scheduler.step()
         if (epoch + 1) % visualize_every == 0 or epoch == start_epoch + num_epochs - 1:
-            latent_save_path = os.path.join(save_dir, f"latent_comparison_epoch_{epoch + 1}.png")
-            visualize_latent_comparison(autoencoder, diffusion, visualization_loader, latent_save_path)
+            # latent_save_path = os.path.join(save_dir, f"latent_comparison_epoch_{epoch + 1}.png")
+            # visualize_latent_comparison(autoencoder, diffusion, visualization_loader, latent_save_path)
             # For visualization, only iterate over a subset of classes (first 2)
             for class_idx in range(min(len(class_names), 2)):
                 create_diffusion_animation(autoencoder, diffusion, class_idx=class_idx, num_frames=50,
@@ -1372,7 +1372,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     if 'diffusion' not in globals():
         conditional_unet, diffusion, diff_losses = train_conditional_diffusion(
             autoencoder, conditional_unet, train_loader, num_epochs=remaining_epochs, lr=1e-3,
-            visualize_every=1,
+            visualize_every=50,
             save_dir=results_dir,
             device=device,
             start_epoch=start_epoch
@@ -1430,4 +1430,3 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
-
