@@ -405,7 +405,7 @@ class Flowers102WithColor(torch.utils.data.Dataset):
         return len(self.flowers)
 
 # =============================================================================
-# ORIGINAL MODEL COMPONENTS (mostly unchanged)
+# ORIGINAL MODEL COMPONENTS
 # =============================================================================
 
 class Swish(nn.Module):
@@ -863,7 +863,7 @@ class ConditionalDenoiseDiffusion():
         return euclidean_distance_loss(eps, eps_theta)
 
 # =============================================================================
-# VISUALIZATION FUNCTIONS (mostly unchanged)
+# VISUALIZATION FUNCTIONS
 # =============================================================================
 
 def generate_samples_grid(autoencoder, diffusion, n_per_class=5, save_dir="./results"):
