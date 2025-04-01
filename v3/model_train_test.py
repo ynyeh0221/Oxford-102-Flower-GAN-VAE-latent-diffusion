@@ -784,7 +784,7 @@ def visualize_reconstructions(autoencoder, epoch, save_dir="./results"):
         axes[1, i].set_title('Reconstruction')
         axes[1, i].axis('off')
     plt.tight_layout()
-    plt.savefig(f"{save_dir}/test_vae_reconstruction_epoch_{epoch}.png")
+    plt.savefig(f"{save_dir}/vae_reconstruction_epoch_{epoch}.png")
     plt.close()
     autoencoder.train()
 
@@ -1294,12 +1294,12 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder, discriminator, ae_losses = train_autoencoder(
             autoencoder,
             train_loader,
-            num_epochs=100,
+            num_epochs=1200,
             lr=1e-4,
             lambda_cls=0.3,
             lambda_center=0.1,
             lambda_vgg=0.4,
-            visualize_every=20,
+            visualize_every=50,
             save_dir=results_dir
         )
         torch.save(autoencoder.state_dict(), autoencoder_path)
@@ -1412,3 +1412,4 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
+
