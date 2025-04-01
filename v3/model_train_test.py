@@ -6,7 +6,6 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import math
 import torch.nn.functional as F
-import os
 import numpy as np
 from tqdm.auto import tqdm
 from sklearn.manifold import TSNE
@@ -15,6 +14,12 @@ from sklearn.cluster import KMeans  # For automated color extraction
 import imageio
 from PIL import Image, ImageFilter
 import cv2
+import os
+os.environ['TORCH_COMPILE_DEBUG'] = '0'
+
+if hasattr(torch, '_dynamo'):
+    if hasattr(torch._dynamo, 'config'):
+        torch._dynamo.config.suppress_errors = True
 
 # If using Colab
 from google.colab import drive
@@ -405,7 +410,7 @@ class Flowers102WithColor(torch.utils.data.Dataset):
         return len(self.flowers)
 
 # =============================================================================
-# ORIGINAL MODEL COMPONENTS
+# ORIGINAL MODEL COMPONENTS (mostly unchanged)
 # =============================================================================
 
 class Swish(nn.Module):
@@ -796,27 +801,57 @@ class ConditionalUNet(nn.Module):
         self.final = nn.Linear(hidden_dims[-1], latent_dim)
         self.residual_weight = nn.Parameter(torch.tensor(0.1))
     def forward(self, x, t, flower_label, color_label):
+        # Save the original input (for the final residual connection)
         residual = x
+        
+        # Compute the time embedding and condition embedding (flower type and color)
         t_emb_base = self.time_emb(t)  # shape: (batch, time_emb_dim)
         cond_emb = self.multi_cond_emb(flower_label, color_label)  # shape: (batch, time_emb_dim)
+        
+        # Project the latent vector
         h = self.latent_proj(x)  # shape: (batch, hidden_dims[0])
+        
+        # Loop through each stage in the network
         for i, (block, layer_norm, downsample) in enumerate(self.layers):
-            t_emb = self.time_projections[i](t_emb_base)  # shape: (batch, hidden_dims[i])
-            cond_emb_proj = self.cond_projections[i](cond_emb)  # shape: (batch, hidden_dims[i])
+            # Project time and condition embeddings to the current stage's hidden dimension
+            t_emb = self.time_projections[i](t_emb_base)       # shape: (batch, hidden_dims[i])
+            cond_emb_proj = self.cond_projections[i](cond_emb)   # shape: (batch, hidden_dims[i])
+            
+            # Add time and condition information to the current features
             h = h + t_emb + cond_emb_proj
+            
+            # Apply a residual block
             h_residual = h
             h = block(h)
             h = h + h_residual
+            
+            # Normalize features using layer normalization
             h_norm = layer_norm(h)
-            h_attn, _ = self.attention_layers[i](h_norm.unsqueeze(0), h_norm.unsqueeze(0), h_norm.unsqueeze(0))
-            h = h + h_attn.squeeze(0)
+            
+            # Adjust shape to (batch, 1, hidden_dims[i]) so that attention is computed within each sample only.
+            h_unsq = h_norm.unsqueeze(1)
+            
+            # Compute self-attention with query, key, and value all set to h_unsq.
+            h_attn, _ = self.attention_layers[i](h_unsq, h_unsq, h_unsq)
+            
+            # Remove the extra dimension and add the attention result as a residual connection.
+            h = h + h_attn.squeeze(1)
+            
+            # Downsample (or project) to the next stage.
             h = downsample(h)
+        
+        # Final stage: combine global time and condition information.
         t_emb_final = self.final_time_proj(t_emb_base)
         cond_final = self.final_class_proj(cond_emb)
         h = h + t_emb_final + cond_final
+        
+        # Apply final normalization and projection.
         h = self.final_norm(h)
         out = self.final(h)
-        return out + torch.sigmoid(self.residual_weight) * self.final(residual)
+        
+        # Return the output with a residual connection from the original input.
+        return out
+
 
 # =============================================================================
 # CONDITIONAL DIFFUSION MODEL (UPDATED TO USE TWO CONDITIONS)
@@ -863,7 +898,7 @@ class ConditionalDenoiseDiffusion():
         return euclidean_distance_loss(eps, eps_theta)
 
 # =============================================================================
-# VISUALIZATION FUNCTIONS
+# VISUALIZATION FUNCTIONS (mostly unchanged)
 # =============================================================================
 
 def generate_samples_grid(autoencoder, diffusion, n_per_class=5, save_dir="./results"):
@@ -1534,15 +1569,15 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         print(f"Epoch {epoch + 1}/{start_epoch + num_epochs}, Average Loss: {avg_loss:.6f}")
         scheduler.step()
         if (epoch + 1) % visualize_every == 0 or epoch == start_epoch + num_epochs - 1:
-            for class_idx in [4, 52]:
+            for class_idx in [4, 53, 68]:
                 create_diffusion_animation(autoencoder, diffusion, class_idx=class_idx, num_frames=50,
                                            save_path=f"{save_dir}/diffusion_animation_class_{class_names[class_idx]}_epoch_{epoch + 1}.gif")
                 sp = f"{save_dir}/sample_class_{class_names[class_idx]}_epoch_{epoch + 1}.png"
                 generate_class_samples(autoencoder, diffusion, target_class=class_idx, num_samples=5, save_path=sp)
-                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_pink_epoch_{epoch + 1}.png"
-                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="pink", num_samples=5, save_path=sp)
                 sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_purple_epoch_{epoch + 1}.png"
-                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="purple",
+                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="purple", num_samples=5, save_path=sp)
+                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_yellow_epoch_{epoch + 1}.png"
+                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="yellow",
                                              num_samples=5, save_path=sp)
                 sp2 = f"{save_dir}/denoising_path_{class_names[class_idx]}_epoch_{epoch + 1}.png"
                 visualize_denoising_steps(autoencoder, diffusion, class_idx=class_idx, save_path=sp2)
@@ -1567,11 +1602,11 @@ def main(checkpoint_path=None, total_epochs=2000):
 
     color_visualization_path = f"{results_dir}/color_visualization.png"
     if flowers_train is not None:
-        create_flower_color_visualization(flowers_train, 100, color_visualization_path)
+        create_flower_color_visualization(flowers_train, num_samples=100, save_path=color_visualization_path)
 
     global class_names
     class_names = flowers_train.flowers.classes if hasattr(flowers_train.flowers, 'classes') else [str(i) for i in range(102)]
-    train_loader = DataLoader(flowers_train, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
+    train_loader = DataLoader(flowers_train, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=True)
     autoencoder_path = f"{results_dir}/vae_gan_final.pt"
     diffusion_path = f"{results_dir}/conditional_diffusion_final.pt"
     autoencoder = SimpleAutoencoder(in_channels=3, latent_dim=256, num_classes=102).to(device)
@@ -1585,7 +1620,7 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder, discriminator, ae_losses = train_autoencoder(
             autoencoder,
             train_loader,
-            num_epochs=1200,
+            num_epochs=2000,
             lr=1e-4,
             lambda_cls=0.3,
             lambda_center=0.1,
