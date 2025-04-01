@@ -13,10 +13,8 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans  # For automated color extraction
 import imageio
-
-# If using Colab
-from google.colab import drive
-drive.mount('/content/drive')
+from PIL import Image, ImageFilter
+import cv2
 
 # Set random seed for reproducibility
 torch.manual_seed(42)
@@ -44,11 +42,7 @@ batch_size = 64  # Adjust based on available GPU memory
 # (For visualization purposes we will only show a subset.)
 class_names = None
 
-# =============================================================================
-# AUTOMATED COLOR EXTRACTION & CUSTOM DATASET
-# =============================================================================
-
-# Define color prototypes (RGB) for 10 color categories and a mapping to indices.
+# Define color prototypes (RGB) for 10 color categories
 COLOR_CATEGORIES = {
     "red": np.array([255, 0, 0]),
     "green": np.array([0, 128, 0]),
@@ -61,42 +55,319 @@ COLOR_CATEGORIES = {
     "white": np.array([255, 255, 255]),
     "black": np.array([0, 0, 0])
 }
+
 COLOR_MAPPING = {"red": 0, "green": 1, "blue": 2, "yellow": 3,
                  "orange": 4, "purple": 5, "pink": 6, "brown": 7,
                  "white": 8, "black": 9}
 
-def map_color_to_category(dominant_color):
-    """Map an RGB dominant color to a predefined color category index."""
-    dominant_color = np.array(dominant_color)
-    min_dist = float('inf')
-    chosen_color = None
-    for color_name, rgb in COLOR_CATEGORIES.items():
-        dist = np.linalg.norm(dominant_color - rgb)
-        if dist < min_dist:
-            min_dist = dist
-            chosen_color = color_name
-    return COLOR_MAPPING[chosen_color]
 
-def extract_color_category(image, k=3):
+def rgb_to_hsv(r, g, b):
     """
-    Given a PIL image, extract its dominant color using k-means clustering
-    and then map it to one of the predefined color categories.
+    Convert r,g,b in [0..1] to (h,s,v) with:
+      h in [0..360)
+      s,v in [0..1]
     """
-    img_np = np.asarray(image)
-    # Remove alpha channel if present
-    if img_np.ndim == 3 and img_np.shape[-1] == 4:
-        img_np = img_np[..., :3]
-    pixels = img_np.reshape(-1, 3)
-    kmeans = KMeans(n_clusters=k, random_state=42).fit(pixels)
-    counts = np.bincount(kmeans.labels_)
-    dominant_idx = np.argmax(counts)
-    dominant_color = kmeans.cluster_centers_[dominant_idx]
-    return map_color_to_category(dominant_color)
+    mx = max(r, g, b)
+    mn = min(r, g, b)
+    diff = mx - mn
+
+    # Hue
+    if diff < 1e-6:
+        h = 0.0
+    elif mx == r:
+        h = (60 * ((g - b) / diff) + 360) % 360
+    elif mx == g:
+        h = (60 * ((b - r) / diff) + 120) % 360
+    else:  # mx == b
+        h = (60 * ((r - g) / diff) + 240) % 360
+
+    # Value
+    v = mx
+
+    # Saturation
+    if mx < 1e-6:
+        s = 0.0
+    else:
+        s = diff / mx
+
+    return h, s, v
+
+
+def hsv_to_color_name(h, s, v):
+    """
+    Rule-based classification from HSV to a color name (string).
+    Skips "green" and "black" (assuming we don't want to label flowers as green/black).
+    If no rule matches, we fallback to nearest color (excluding green/black).
+    """
+    # 1) Check a few "special" categories first
+    # We'll skip labeling as black or green to avoid background or extremely dark results.
+
+    # White: high value, low saturation
+    if v > 0.85 and s < 0.2:
+        return "white"
+
+    # Brown: hue in [10..40], moderate saturation, moderate value
+    #        e.g. s up to ~0.6, v up to ~0.6
+    if 10 <= h <= 40 and s <= 0.6 and v <= 0.6:
+        return "brown"
+
+    # Pink: hue around [300..345], or 0..15 if it's not too saturated
+    #       We can also interpret pink as red with a high value, moderate saturation
+    #       We'll do a direct approach for pink.
+    if (300 <= h < 360) or (0 <= h < 20):
+        # Distinguish pink vs red by brightness or saturation
+        # e.g. pink if v>0.5 and s<0.8, etc.
+        if v > 0.6 and s < 0.8:
+            return "pink"
+        else:
+            return "red"
+
+    # Red: hue near 0 or > 340, if not covered by pink
+    if (h < 20 or h > 340) and s > 0.2 and v > 0.2:
+        return "red"
+
+    # Orange: hue in [20..45], if not covered by brown
+    if 20 <= h < 45 and s > 0.3 and v > 0.3:
+        return "orange"
+
+    # Yellow: hue in [45..65], s>0.3, v>0.3
+    if 45 <= h < 65 and s > 0.3 and v > 0.3:
+        return "yellow"
+
+    # Green: (we skip final classification as green, but if you do want it, define it here)
+    # if 65 <= h < 170 and s > 0.2 and v > 0.2:
+    #     return "green"
+
+    # Blue: hue in [170..250], s>0.2, v>0.2
+    if 170 <= h < 250 and s > 0.2 and v > 0.2:
+        return "blue"
+
+    # Purple: hue in [250..290], s>0.2, v>0.2
+    if 250 <= h < 310 and s > 0.2 and v > 0.2:
+        return "purple"
+
+    # If we get here, we do a fallback to the nearest color (skipping green & black).
+    return None
+
+
+def fallback_nearest_color(r255, g255, b255):
+    """
+    Fallback to the nearest color in COLOR_CATEGORIES, but skip "green" and "black".
+    """
+    best_color = None
+    best_dist = 1e9
+    for color_name, rgb_val in COLOR_CATEGORIES.items():
+        if color_name in ["green", "black"]:
+            continue
+        dist = np.linalg.norm(np.array([r255, g255, b255]) - rgb_val.astype(np.float32))
+        if dist < best_dist:
+            best_dist = dist
+            best_color = color_name
+    return best_color
+
+
+def extract_color_category(image, k=5):
+    """
+    K-means + HSV-based color classification.
+    We skip labeling as "green" or "black" to reduce background/dark confusion.
+    """
+    try:
+        # 1) Convert to NumPy and blur
+        if hasattr(image, 'convert'):  # PIL
+            image = image.convert('RGB')
+            image = image.filter(ImageFilter.GaussianBlur(radius=1))
+            img_np = np.array(image)
+        elif hasattr(image, 'numpy') and hasattr(image, 'permute'):  # PyTorch tensor
+            if image.ndim == 3 and image.shape[0] <= 3:
+                img_np = image.permute(1, 2, 0).cpu().numpy()
+            else:
+                img_np = image.cpu().numpy()
+        elif isinstance(image, np.ndarray):
+            img_np = image.copy()
+        else:
+            raise TypeError("Unsupported image type")
+
+        # 2) Handle grayscale/alpha
+        if img_np.ndim == 2:
+            img_np = np.stack([img_np, img_np, img_np], axis=2)
+        if img_np.shape[2] == 4:
+            img_np = img_np[..., :3]
+
+        # 3) Normalize [0..1]
+        if img_np.max() > 1.0:
+            pixels = img_np.reshape(-1, 3).astype(np.float32) / 255.0
+        else:
+            pixels = img_np.reshape(-1, 3).astype(np.float32)
+
+        # 4) Filter out extremely dark/bright or unsaturated
+        brightness = pixels.mean(axis=1)
+        max_c = pixels.max(axis=1)
+        min_c = pixels.min(axis=1)
+        saturation = (max_c - min_c) / np.maximum(max_c, 1e-6)
+
+        # Example thresholds
+        # Keep: 0.15 < brightness < 0.95, saturation > 0.1
+        mask_bright = (brightness > 0.15) & (brightness < 0.95)
+        mask_sat = saturation > 0.1
+        combined_mask = mask_bright & mask_sat
+        if np.sum(combined_mask) < 50:
+            # if too few remain, skip saturation mask
+            combined_mask = mask_bright
+        filtered_pixels = pixels[combined_mask]
+        if len(filtered_pixels) < 10:
+            return "unknown", -1
+
+        # 5) K-means
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(filtered_pixels)
+        centers = kmeans.cluster_centers_
+        counts = np.bincount(kmeans.labels_)
+
+        # 6) Weighted selection (bigger cluster => more weight)
+        #    also boost more saturated clusters
+        cluster_weights = []
+        for i, c in enumerate(centers):
+            size_weight = counts[i]
+            r, g, b = c
+            c_max = max(r, g, b)
+            c_min = min(r, g, b)
+            c_sat = (c_max - c_min) / (c_max + 1e-6)
+            # cluster weight = size * (1 + saturation bonus)
+            cluster_weight = size_weight * (1.0 + 1.5 * c_sat)
+            cluster_weights.append(cluster_weight)
+
+        # 7) Sort clusters by descending weight
+        sorted_idx = np.argsort(cluster_weights)[::-1]
+
+        # 8) Try each cluster in descending order, do HSV classification
+        fallback_choice = None
+        for idx in sorted_idx:
+            r, g, b = centers[idx]
+            h, s, v = rgb_to_hsv(r, g, b)
+            color_name = hsv_to_color_name(h, s, v)
+            if color_name is not None:
+                # We have a rule-based color
+                return color_name, COLOR_MAPPING[color_name]
+            else:
+                # fallback if none rule matched
+                # but only store first cluster as fallback
+                if fallback_choice is None:
+                    fallback_choice = idx
+
+        # If all clusters fail direct rules, fallback to nearest color for top cluster
+        if fallback_choice is not None:
+            r, g, b = centers[fallback_choice]
+            r255, g255, b255 = (r * 255, g * 255, b * 255)
+            fallback_color = fallback_nearest_color(r255, g255, b255)
+            return fallback_color, COLOR_MAPPING[fallback_color]
+
+        # Otherwise unknown
+        return "unknown", -1
+
+    except Exception as e:
+        print(f"Error in color extraction: {e}")
+        return "unknown", -1
+
+def create_flower_color_visualization(flowers, num_samples=20, save_path='flower_color_visualization.png'):
+    """
+    Create a visualization of flower samples and their color labels.
+    Handles two cases:
+    1. Standard Flowers102 dataset (returns image, label)
+    2. Flowers102WithColor dataset (returns image, flower_label, color_label)
+    """
+    if flowers is None:
+        print("Cannot create flower color visualization. Dataset is not loaded.")
+        return
+
+    # Make sure our imports are available
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import torch
+    from torchvision import transforms
+
+    fig, axes = plt.subplots(4, 5, figsize=(15, 12))
+    axes = axes.flatten()
+
+    indices = np.random.choice(len(flowers), num_samples, replace=False)
+
+    # Define reverse mapping from color index to name
+    reverse_color_mapping = {idx: name for name, idx in COLOR_MAPPING.items()}
+
+    for i, idx in enumerate(indices):
+        if i >= len(axes):
+            break
+
+        # Get the item from dataset
+        item = flowers[idx]
+
+        # Handle different types of datasets
+        if len(item) == 2:  # Standard Flowers102 returns (image, label)
+            img, flower_label = item
+
+            # Extract color directly from the image
+            if isinstance(img, torch.Tensor):
+                img_pil = transforms.ToPILImage()(img)
+            else:
+                img_pil = img
+
+            # Use our simplified color extraction function
+            try:
+                color_name, color_idx = extract_color_category(img_pil)
+            except Exception as e:
+                print(f"Error extracting color from image: {e}")
+                color_name = "unknown"
+                color_idx = -1
+
+        else:  # Flowers102WithColor returns (image, flower_label, color_label)
+            img, flower_label, color_idx = item
+
+            # Get color name from index using our reverse mapping
+            if color_idx in reverse_color_mapping:
+                color_name = reverse_color_mapping[color_idx]
+            else:
+                # If we're getting an index not in our mapping, extract color from image
+                if isinstance(img, torch.Tensor):
+                    img_pil = transforms.ToPILImage()(img)
+                else:
+                    img_pil = img
+
+                try:
+                    color_name, _ = extract_color_category(img_pil)
+                except Exception as e:
+                    print(f"Error extracting color from image: {e}")
+                    color_name = "unknown"
+
+                    # Display the image
+        if isinstance(img, torch.Tensor):
+            img_np = img.permute(1, 2, 0).numpy()
+            axes[i].imshow(img_np)
+        else:
+            axes[i].imshow(img)
+
+        # Get corresponding RGB value for the color
+        if color_name in COLOR_CATEGORIES:
+            color_rgb = COLOR_CATEGORIES[color_name] / 255.0
+        else:
+            # Fallback to gray if color is unknown
+            color_rgb = np.array([0.5, 0.5, 0.5])
+
+        class_name = f"Flower class {flower_label}"
+        axes[i].set_title(f"{class_name}\nColor: {color_name}", fontsize=10)
+        axes[i].axis('off')
+
+        # Add color square
+        axes[i].add_patch(plt.Rectangle((5, 5), 10, 10, color=color_rgb, alpha=0.8))
+
+    plt.tight_layout()
+    plt.suptitle("Flower samples and their auto-extracted color labels", fontsize=16, y=1.02)
+    plt.savefig(save_path, bbox_inches='tight', dpi=150)
+    plt.close()
+    print(f"Visualization saved to {save_path}")
+    return save_path
 
 class Flowers102WithColor(torch.utils.data.Dataset):
     """
     A wrapper for the Flowers102 dataset so that each sample returns:
-    (image, flower_type label, color label)
+    (image, flower_type label, color label as an integer)
     The color label is automatically extracted using k-means clustering.
     """
     def __init__(self, root, split, transform, precompute_color=True):
@@ -107,17 +378,23 @@ class Flowers102WithColor(torch.utils.data.Dataset):
             print("Precomputing color labels for the dataset...")
             for i in tqdm(range(len(self.flowers)), desc="Computing Colors"):
                 image, _ = self.flowers[i]  # Get PIL image (before transform)
+                # extract_color_category returns (color_name, color_index)
                 color_label = extract_color_category(image)
-                self.color_labels.append(color_label)
+                # Save only the integer index
+                self.color_labels.append(color_label[1])
         else:
             self.color_labels = None
 
     def __getitem__(self, index):
         image, flower_label = self.flowers[index]
         if self.color_labels is not None:
+            # Return only the integer index
             color_label = self.color_labels[index]
         else:
+            # Compute on the fly and take only the index
             color_label = extract_color_category(image)
+            if isinstance(color_label, (list, tuple)):
+                color_label = color_label[1]
         return image, flower_label, color_label
 
     def __len__(self):
@@ -1237,7 +1514,8 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         for batch_idx, (data, flower_labels, color_labels) in enumerate(tqdm(train_loader, desc=f"Epoch {epoch + 1}/{start_epoch + num_epochs}")):
             data = data.to(device)
             flower_labels = flower_labels.to(device)
-            color_labels = color_labels.to(device)
+            # color_labels is now already a tensor of integers (or can be converted easily)
+            color_labels = torch.tensor(color_labels, dtype=torch.long).to(device)
             with torch.no_grad():
                 mu, logvar = autoencoder.encode_with_params(data)
                 z = autoencoder.reparameterize(mu, logvar)
@@ -1257,8 +1535,8 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
                                            save_path=f"{save_dir}/diffusion_animation_class_{class_names[class_idx]}_epoch_{epoch + 1}.gif")
                 sp = f"{save_dir}/sample_class_{class_names[class_idx]}_epoch_{epoch + 1}.png"
                 generate_class_samples(autoencoder, diffusion, target_class=class_idx, num_samples=5, save_path=sp)
-                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_blue_epoch_{epoch + 1}.png"
-                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="blue", num_samples=5, save_path=sp)
+                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_pink_epoch_{epoch + 1}.png"
+                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="pink", num_samples=5, save_path=sp)
                 sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_yellow_epoch_{epoch + 1}.png"
                 generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="yellow",
                                              num_samples=5, save_path=sp)
@@ -1282,6 +1560,11 @@ def main(checkpoint_path=None, total_epochs=2000):
     print("Loading Oxford 102 Flowers dataset with automated color extraction...")
     # Use the custom dataset that returns (image, flower_label, color_label)
     flowers_train = Flowers102WithColor(root='./data', split='train', transform=transform_train, precompute_color=True)
+
+    color_visualization_path = f"{results_dir}/color_visualization.png"
+    if flowers_train is not None:
+        create_flower_color_visualization(flowers_train, 100, color_visualization_path)
+
     global class_names
     class_names = flowers_train.flowers.classes if hasattr(flowers_train.flowers, 'classes') else [str(i) for i in range(102)]
     train_loader = DataLoader(flowers_train, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
@@ -1416,4 +1699,3 @@ def main(checkpoint_path=None, total_epochs=2000):
 
 if __name__ == "__main__":
     main(total_epochs=10000)
-
