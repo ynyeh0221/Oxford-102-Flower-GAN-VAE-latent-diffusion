@@ -1273,7 +1273,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     print("Starting class-conditional diffusion model for Oxford 102 Flowers with improved architecture")
     device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
     print(f"Using device: {device}")
-    results_dir = "./oxford_flowers_conditional_improved"
+    results_dir = "./oxford_flowers_conditional_improved_v3"
     os.makedirs(results_dir, exist_ok=True)
     print("Loading Oxford 102 Flowers dataset with automated color extraction...")
     # Use the custom dataset that returns (image, flower_label, color_label)
@@ -1281,7 +1281,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     global class_names
     class_names = flowers_train.flowers.classes if hasattr(flowers_train.flowers, 'classes') else [str(i) for i in range(102)]
     train_loader = DataLoader(flowers_train, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory=True)
-    autoencoder_path = f"{results_dir}/flowers_autoencoder.pt"
+    autoencoder_path = f"{results_dir}/vae_gan_final.pt"
     diffusion_path = f"{results_dir}/conditional_diffusion_final.pt"
     autoencoder = SimpleAutoencoder(in_channels=3, latent_dim=256, num_classes=102).to(device)
     if os.path.exists(autoencoder_path):
@@ -1291,7 +1291,7 @@ def main(checkpoint_path=None, total_epochs=2000):
         autoencoder.eval()
     else:
         print("No existing autoencoder found. Training a new one with improved architecture...")
-        autoencoder, ae_losses, _ = train_autoencoder(
+        autoencoder, discriminator, ae_losses = train_autoencoder(
             autoencoder,
             train_loader,
             num_epochs=100,
