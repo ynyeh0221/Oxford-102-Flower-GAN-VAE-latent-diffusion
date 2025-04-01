@@ -16,6 +16,10 @@ import imageio
 from PIL import Image, ImageFilter
 import cv2
 
+# If using Colab
+from google.colab import drive
+drive.mount('/content/drive')
+
 # Set random seed for reproducibility
 torch.manual_seed(42)
 np.random.seed(42)
