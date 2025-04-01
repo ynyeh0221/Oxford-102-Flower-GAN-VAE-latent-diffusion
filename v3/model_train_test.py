@@ -1559,7 +1559,7 @@ def main(checkpoint_path=None, total_epochs=2000):
     print("Starting class-conditional diffusion model for Oxford 102 Flowers with improved architecture")
     device = torch.device("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
     print(f"Using device: {device}")
-    results_dir = "./oxford_flowers_conditional_improved_v3"
+    results_dir = "/content/drive/MyDrive/oxford_flowers_conditional_improved_v3"
     os.makedirs(results_dir, exist_ok=True)
     print("Loading Oxford 102 Flowers dataset with automated color extraction...")
     # Use the custom dataset that returns (image, flower_label, color_label)
