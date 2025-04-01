@@ -1530,15 +1530,15 @@ def train_conditional_diffusion(autoencoder, unet, train_loader, num_epochs=100,
         print(f"Epoch {epoch + 1}/{start_epoch + num_epochs}, Average Loss: {avg_loss:.6f}")
         scheduler.step()
         if (epoch + 1) % visualize_every == 0 or epoch == start_epoch + num_epochs - 1:
-            for class_idx in [4, 6]:
+            for class_idx in [4, 52]:
                 create_diffusion_animation(autoencoder, diffusion, class_idx=class_idx, num_frames=50,
                                            save_path=f"{save_dir}/diffusion_animation_class_{class_names[class_idx]}_epoch_{epoch + 1}.gif")
                 sp = f"{save_dir}/sample_class_{class_names[class_idx]}_epoch_{epoch + 1}.png"
                 generate_class_samples(autoencoder, diffusion, target_class=class_idx, num_samples=5, save_path=sp)
                 sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_pink_epoch_{epoch + 1}.png"
                 generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="pink", num_samples=5, save_path=sp)
-                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_yellow_epoch_{epoch + 1}.png"
-                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="yellow",
+                sp = f"{save_dir}/sample_class_color_{class_names[class_idx]}_purple_epoch_{epoch + 1}.png"
+                generate_class_color_samples(autoencoder, diffusion, target_class=class_idx, target_color="purple",
                                              num_samples=5, save_path=sp)
                 sp2 = f"{save_dir}/denoising_path_{class_names[class_idx]}_epoch_{epoch + 1}.png"
                 visualize_denoising_steps(autoencoder, diffusion, class_idx=class_idx, save_path=sp2)
