@@ -14,6 +14,10 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans  # For automated color extraction
 import imageio
 
+# If using Colab
+from google.colab import drive
+drive.mount('/content/drive')
+
 # Set random seed for reproducibility
 torch.manual_seed(42)
 np.random.seed(42)
