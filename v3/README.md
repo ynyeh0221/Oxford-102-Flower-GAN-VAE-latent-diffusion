@@ -122,6 +122,14 @@ animation_path = create_diffusion_animation(autoencoder, diffusion, class_idx=5)
 3. **Latent Space Projections**: Visualize the structure of the learned latent space
 4. **Diffusion Animations**: Animated visualization of the denoising process
 
+ Model Component | Visualization | Description |
+|-----------------|---------------|-------------|
+| Autoencoder | ![Reconstructions](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/reconstruction/vae_reconstruction_epoch_2000.png) | Original images (top) and their reconstructions (bottom) |
+| Latent Space | ![Latent Space](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/latent_space/vae_latent_space_epoch_2000.png) | t-SNE visualization of cat and dog latent representations |
+| Class Samples | ![Class Samples](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_sample_result/sample_class_4_epoch_2750.png)![Class Samples](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_sample_result/sample_class_53_epoch_2750.png) | Generated samples for cat and dog classes |
+| Denoising Process | ![Denoising Class 4](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_path/denoising_path_4_epoch_2750.png)![Denoising Class 53](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_path/denoising_path_53_epoch_2750.png) | Visualization of cat generation process and latent path |
+| Animation | ![Class 4 Animation](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_animation_class_4_epoch_2750.gif)![Class 53 Animation](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v3/output/diffusion_animation_class_53_epoch_2750.gif) | Animation of the denoising process for cat generation |
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
