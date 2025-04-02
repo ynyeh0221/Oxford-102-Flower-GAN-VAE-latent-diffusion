@@ -59,6 +59,8 @@ Trains a transformer-inspired UNet operating in latent space to denoise class-co
 - `diffusion_animation_<class>.gif`: Animated denoising per class
 - `denoising_path_<class>.png`: Latent space path during generation
 
+Below example results were generated from [V2 model of this repo](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/tree/main/v2).
+
  Model Component | Visualization | Description |
 |-----------------|---------------|-------------|
 | Autoencoder | ![Reconstructions](https://github.com/ynyeh0221/Oxford-120-Flower-GAN-VAE-latent-diffusion/blob/main/v1/output/reconstruction/vae_reconstruction_epoch_1400.png) | Original images (top) and their reconstructions (bottom) |
