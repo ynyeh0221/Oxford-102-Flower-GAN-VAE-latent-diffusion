@@ -75,7 +75,7 @@ The script generates several outputs:
 | Epoch 150 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_150.png) |
 | Epoch 180 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_180.png) |
 | Epoch 210 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_210.png) |
-| Epoch 240 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_240.png) |
+| Epoch 240 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_250.png) |
 | Epoch 270 | ![](https://github.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion/blob/main/v4/output/diffusion_sample_result/samples_grid_epoch_270.png) |
 
 ## Customization
