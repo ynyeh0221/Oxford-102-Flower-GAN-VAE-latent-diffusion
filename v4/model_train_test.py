@@ -32,7 +32,7 @@ train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, nu
 test_loader  = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=2, pin_memory=True)
 
 # -----------------------------
-# Simple UNet for Pixel Diffusion
+# Simple UNet for Pixel Diffusion with Time Conditioning
 # -----------------------------
 class SimpleUNet(nn.Module):
     def __init__(self, in_channels=3, base_channels=64, time_emb_dim=128):
@@ -44,6 +44,11 @@ class SimpleUNet(nn.Module):
             nn.ReLU(),
             nn.Linear(time_emb_dim, time_emb_dim),
         )
+        # Linear layers to map time embedding to each stage's channel dimension
+        self.time_fc1 = nn.Linear(time_emb_dim, base_channels)            # For stage 1 (channels=64)
+        self.time_fc2 = nn.Linear(time_emb_dim, base_channels * 2)          # For stage 2 (channels=128)
+        self.time_fc3 = nn.Linear(time_emb_dim, base_channels * 4)          # For stage 3 (channels=256)
+        
         # Encoder
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, base_channels, kernel_size=3, padding=1),
@@ -99,18 +104,22 @@ class SimpleUNet(nn.Module):
         t = t.view(B, 1).float()
         t_emb = self.time_embed(t)  # shape: (B, time_emb_dim)
         
+        # Map time embedding to each stage
+        t_emb1 = self.time_fc1(t_emb).view(B, -1, 1, 1)   # For stage 1
+        t_emb2 = self.time_fc2(t_emb).view(B, -1, 1, 1)   # For stage 2
+        t_emb3 = self.time_fc3(t_emb).view(B, -1, 1, 1)   # For stage 3
+        
         # Encoder stage 1
         x1 = self.conv1(x)  # (B, base_channels, 64, 64)
-        # Add time-conditioning (broadcasting part of the time embedding)
-        x1 = x1 + t_emb[:, :x1.shape[1]].view(B, x1.shape[1], 1, 1)
+        x1 = x1 + t_emb1
         # Encoder stage 2
         x2 = self.down1(x1)  # (B, base_channels*2, 32, 32)
         x2 = self.conv2(x2)  # (B, base_channels*2, 32, 32)
-        x2 = x2 + t_emb[:, :x2.shape[1]].view(B, x2.shape[1], 1, 1)
+        x2 = x2 + t_emb2
         # Encoder stage 3
         x3 = self.down2(x2)  # (B, base_channels*4, 16, 16)
         x3 = self.conv3(x3)  # (B, base_channels*4, 16, 16)
-        x3 = x3 + t_emb[:, :x3.shape[1]].view(B, x3.shape[1], 1, 1)
+        x3 = x3 + t_emb3
         # Bottleneck
         x4 = self.bottleneck(x3)  # (B, base_channels*4, 16, 16)
         # Decoder stage 1
@@ -139,7 +148,7 @@ class DiffusionModel:
     def q_sample(self, x0, t, noise=None):
         if noise is None:
             noise = torch.randn_like(x0)
-        # t is a tensor of indices, reshape alpha_bar accordingly
+        # t is a tensor of indices; reshape alpha_bar accordingly
         alpha_bar_t = self.alpha_bar[t].view(-1, 1, 1, 1)
         return torch.sqrt(alpha_bar_t) * x0 + torch.sqrt(1 - alpha_bar_t) * noise
 
@@ -185,7 +194,6 @@ class DiffusionModel:
         for t in reversed(range(self.n_steps)):
             x = self.p_sample(x, t)
             if t in capture_steps:
-                # Clamp to [0,1] for visualization
                 img = x.clamp(0, 1).squeeze().cpu().permute(1, 2, 0).numpy()
                 frames.append(img)
         return frames
@@ -202,7 +210,7 @@ def generate_samples_grid(diffusion, n_samples=16, save_path="samples_grid.png",
         for _ in range(n_samples):
             img = diffusion.sample((1, 3, img_size, img_size))
             samples.append(img.squeeze().cpu().permute(1, 2, 0).numpy())
-    # Create grid
+    # Create grid image
     fig, axes = plt.subplots(grid_rows, grid_cols, figsize=(grid_cols * 2, grid_rows * 2))
     for i in range(grid_rows):
         for j in range(grid_cols):
@@ -216,15 +224,12 @@ def generate_samples_grid(diffusion, n_samples=16, save_path="samples_grid.png",
 
 def create_diffusion_animation(diffusion, save_path="diffusion_animation.gif", num_frames=50, device="cpu"):
     diffusion.model.eval()
-    # Choose timesteps to capture frames. For example, equally spaced over [0, n_steps-1]
     step_interval = diffusion.n_steps // num_frames
     capture_steps = set(range(0, diffusion.n_steps, step_interval))
-    # Ensure final frame at t=0 is captured.
-    capture_steps.add(0)
+    capture_steps.add(0)  # Ensure the final frame is captured
     print(f"Capturing frames at timesteps: {sorted(capture_steps)}")
     with torch.no_grad():
         frames = diffusion.sample_with_intermediates((1, 3, img_size, img_size), capture_steps)
-    # Save GIF animation
     imageio.mimsave(save_path, [np.uint8(255 * frame) for frame in frames], fps=10)
     print(f"Animation saved to {save_path}")
 
@@ -260,7 +265,7 @@ def main():
 
     # Train the diffusion model on image pixels
     print("Training Diffusion Model in pixel space...")
-    train_diffusion(diffusion, train_loader, num_epochs=50, device=device)
+    train_diffusion(diffusion, train_loader, num_epochs=300, device=device)
 
     # Generate and save a grid of sample images
     generate_samples_grid(diffusion, n_samples=16, save_path="samples_grid.png", device=device)
