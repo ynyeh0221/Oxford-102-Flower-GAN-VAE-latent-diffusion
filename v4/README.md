@@ -66,7 +66,7 @@ The script generates several outputs:
 - `diffusion_animation.gif`: Animation showing the denoising process
 - `generated_pixel_diffusion.png`: A single generated image
 
-| | |
+| | Output Samples |
 |-----------------|---------------|
 | Epoch 30 | ![]() |
 | Epoch 60 | ![]() |
