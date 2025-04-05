@@ -66,6 +66,18 @@ The script generates several outputs:
 - `diffusion_animation.gif`: Animation showing the denoising process
 - `generated_pixel_diffusion.png`: A single generated image
 
+| | |
+|-----------------|---------------|
+| Epoch 30 | ![]() |
+| Epoch 60 | ![]() |
+| Epoch 90 | ![]() |
+| Epoch 120 | ![]() |
+| Epoch 150 | ![]() |
+| Epoch 180 | ![]() |
+| Epoch 210 | ![]() |
+| Epoch 240 | ![]() |
+| Epoch 270 | ![]() |
+
 ## Customization
 
 You can customize the model by modifying these parameters:
