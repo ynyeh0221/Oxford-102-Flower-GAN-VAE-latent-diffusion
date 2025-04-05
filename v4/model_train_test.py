@@ -8,6 +8,7 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
+import imageio
 
 # -----------------------------
 # Data Transforms and Dataset
@@ -37,7 +38,7 @@ class SimpleUNet(nn.Module):
     def __init__(self, in_channels=3, base_channels=64, time_emb_dim=128):
         super().__init__()
         self.time_emb_dim = time_emb_dim
-        # Time embedding: map scalar timestep to a vector
+        # Time embedding: map a scalar timestep to a vector
         self.time_embed = nn.Sequential(
             nn.Linear(1, time_emb_dim),
             nn.ReLU(),
@@ -72,14 +73,14 @@ class SimpleUNet(nn.Module):
             nn.ReLU(),
         )
         # Decoder
-        self.up1 = nn.ConvTranspose2d(base_channels * 4, base_channels * 2, kernel_size=4, stride=2, padding=1)  # 16 -> 32
+        self.up1 = nn.ConvTranspose2d(base_channels * 4, base_channels * 2, kernel_size=4, stride=2, padding=1)  # 16->32
         self.conv4 = nn.Sequential(
             nn.Conv2d(base_channels * 4, base_channels * 2, kernel_size=3, padding=1),  # concat skip from conv2
             nn.ReLU(),
             nn.Conv2d(base_channels * 2, base_channels * 2, kernel_size=3, padding=1),
             nn.ReLU(),
         )
-        self.up2 = nn.ConvTranspose2d(base_channels * 2, base_channels, kernel_size=4, stride=2, padding=1)  # 32 -> 64
+        self.up2 = nn.ConvTranspose2d(base_channels * 2, base_channels, kernel_size=4, stride=2, padding=1)  # 32->64
         self.conv5 = nn.Sequential(
             nn.Conv2d(base_channels * 2, base_channels, kernel_size=3, padding=1),  # concat skip from conv1
             nn.ReLU(),
@@ -94,26 +95,31 @@ class SimpleUNet(nn.Module):
         t: timestep tensor of shape (B,) or (B,1)
         """
         B = x.size(0)
+        # Process time embedding
         t = t.view(B, 1).float()
-        t_emb = self.time_embed(t)  # shape (B, time_emb_dim)
-        # Encoder
+        t_emb = self.time_embed(t)  # shape: (B, time_emb_dim)
+        
+        # Encoder stage 1
         x1 = self.conv1(x)  # (B, base_channels, 64, 64)
-        # Add time conditioning (use the first channels of t_emb)
+        # Add time-conditioning (broadcasting part of the time embedding)
         x1 = x1 + t_emb[:, :x1.shape[1]].view(B, x1.shape[1], 1, 1)
+        # Encoder stage 2
         x2 = self.down1(x1)  # (B, base_channels*2, 32, 32)
         x2 = self.conv2(x2)  # (B, base_channels*2, 32, 32)
         x2 = x2 + t_emb[:, :x2.shape[1]].view(B, x2.shape[1], 1, 1)
+        # Encoder stage 3
         x3 = self.down2(x2)  # (B, base_channels*4, 16, 16)
         x3 = self.conv3(x3)  # (B, base_channels*4, 16, 16)
         x3 = x3 + t_emb[:, :x3.shape[1]].view(B, x3.shape[1], 1, 1)
         # Bottleneck
         x4 = self.bottleneck(x3)  # (B, base_channels*4, 16, 16)
-        # Decoder
+        # Decoder stage 1
         x5 = self.up1(x4)  # (B, base_channels*2, 32, 32)
-        x5 = torch.cat([x5, x2], dim=1)  # concatenate skip from encoder
+        x5 = torch.cat([x5, x2], dim=1)  # skip connection
         x5 = self.conv4(x5)  # (B, base_channels*2, 32, 32)
+        # Decoder stage 2
         x6 = self.up2(x5)    # (B, base_channels, 64, 64)
-        x6 = torch.cat([x6, x1], dim=1)  # concatenate skip from encoder
+        x6 = torch.cat([x6, x1], dim=1)  # skip connection
         x6 = self.conv5(x6)  # (B, base_channels, 64, 64)
         out = self.out_conv(x6)  # (B, 3, 64, 64)
         return out
@@ -153,7 +159,7 @@ class DiffusionModel:
         return sample
 
     def sample(self, shape):
-        # Start from pure noise
+        # Generate an image starting from pure noise
         x = torch.randn(shape, device=self.device)
         for t in reversed(range(self.n_steps)):
             x = self.p_sample(x, t)
@@ -166,6 +172,61 @@ class DiffusionModel:
         x_t = self.q_sample(x0, t, noise)
         noise_pred = self.model(x_t, t)
         return F.mse_loss(noise_pred, noise)
+
+    def sample_with_intermediates(self, shape, capture_steps):
+        """
+        Generates a sample while capturing intermediate frames.
+        capture_steps: list of timesteps at which to capture frames.
+        Returns a list of images (as numpy arrays).
+        """
+        frames = []
+        x = torch.randn(shape, device=self.device)
+        # Iterate over timesteps in reverse order
+        for t in reversed(range(self.n_steps)):
+            x = self.p_sample(x, t)
+            if t in capture_steps:
+                # Clamp to [0,1] for visualization
+                img = x.clamp(0, 1).squeeze().cpu().permute(1, 2, 0).numpy()
+                frames.append(img)
+        return frames
+
+# -----------------------------
+# Visualization Functions
+# -----------------------------
+def generate_samples_grid(diffusion, n_samples=16, save_path="samples_grid.png", device="cpu"):
+    diffusion.model.eval()
+    grid_rows = int(math.sqrt(n_samples))
+    grid_cols = grid_rows
+    samples = []
+    with torch.no_grad():
+        for _ in range(n_samples):
+            img = diffusion.sample((1, 3, img_size, img_size))
+            samples.append(img.squeeze().cpu().permute(1, 2, 0).numpy())
+    # Create grid
+    fig, axes = plt.subplots(grid_rows, grid_cols, figsize=(grid_cols * 2, grid_rows * 2))
+    for i in range(grid_rows):
+        for j in range(grid_cols):
+            idx = i * grid_cols + j
+            axes[i, j].imshow(np.clip(samples[idx], 0, 1))
+            axes[i, j].axis("off")
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    print(f"Sample grid saved to {save_path}")
+
+def create_diffusion_animation(diffusion, save_path="diffusion_animation.gif", num_frames=50, device="cpu"):
+    diffusion.model.eval()
+    # Choose timesteps to capture frames. For example, equally spaced over [0, n_steps-1]
+    step_interval = diffusion.n_steps // num_frames
+    capture_steps = set(range(0, diffusion.n_steps, step_interval))
+    # Ensure final frame at t=0 is captured.
+    capture_steps.add(0)
+    print(f"Capturing frames at timesteps: {sorted(capture_steps)}")
+    with torch.no_grad():
+        frames = diffusion.sample_with_intermediates((1, 3, img_size, img_size), capture_steps)
+    # Save GIF animation
+    imageio.mimsave(save_path, [np.uint8(255 * frame) for frame in frames], fps=10)
+    print(f"Animation saved to {save_path}")
 
 # -----------------------------
 # Training Function for Diffusion Model
@@ -184,6 +245,7 @@ def train_diffusion(diffusion, dataloader, num_epochs, device):
             total_loss += loss.item()
         print(f"Diffusion Epoch {epoch+1}/{num_epochs}, Loss: {total_loss/len(dataloader):.4f}")
     torch.save(diffusion.model.state_dict(), "diffusion_unet_pixels.pth")
+    print("Diffusion model weights saved to diffusion_unet_pixels.pth")
 
 # -----------------------------
 # Main Function
@@ -200,11 +262,16 @@ def main():
     print("Training Diffusion Model in pixel space...")
     train_diffusion(diffusion, train_loader, num_epochs=50, device=device)
 
-    # Generate a sample image using the trained diffusion model
-    unet.eval()
+    # Generate and save a grid of sample images
+    generate_samples_grid(diffusion, n_samples=16, save_path="samples_grid.png", device=device)
+
+    # Create and save an animation of the denoising process
+    create_diffusion_animation(diffusion, save_path="diffusion_animation.gif", num_frames=50, device=device)
+
+    # Additionally, display one generated image
+    diffusion.model.eval()
     with torch.no_grad():
-        sample_shape = (1, 3, img_size, img_size)
-        generated = diffusion.sample(sample_shape)
+        generated = diffusion.sample((1, 3, img_size, img_size))
         img = generated.squeeze().cpu().permute(1, 2, 0).numpy()
         plt.figure(figsize=(4, 4))
         plt.imshow(np.clip(img, 0, 1))
