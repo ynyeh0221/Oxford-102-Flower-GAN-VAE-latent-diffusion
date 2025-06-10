@@ -34,6 +34,7 @@ A class-conditional generative modeling framework combining Variational Autoenco
 
 - **Oxford 102 Flowers** dataset: 102 flower categories with segmented images.
 - Automatically downloaded via `torchvision.datasets.Flowers102`.
+- Images are cached to the default `~/.cache/torch` directory on first run.
 
 ## Training
 
@@ -73,9 +74,10 @@ Below example results were generated from [V2 model of this repo](https://github
 
 ## Getting Started
 
-1. Clone this repo and install dependencies (PyTorch, torchvision, scikit-learn, imageio, etc.).
-2. Run `main.py` to train or resume training.
-3. Visualizations and outputs are saved under `./results`.
+1. Clone this repository.
+2. Set up the Python environment and install dependencies (see [Installation](#installation)).
+3. Run `main.py` to train or resume training.
+4. Visualizations and model checkpoints are written to the `./results` directory.
 
 ## Requirements
 
@@ -86,3 +88,22 @@ Below example results were generated from [V2 model of this repo](https://github
 - matplotlib
 - tqdm
 - imageio
+
+## Installation
+
+1. Create a Python 3.8+ environment with your favorite tool (conda, venv, etc.).
+2. Install the packages listed below, e.g.:
+
+```bash
+pip install torch torchvision scikit-learn matplotlib tqdm imageio
+```
+
+## Repository Structure
+
+- `v1` – initial VAE-diffusion implementation
+- `v2` – improved training utilities and logging
+- `v3` – multi-conditional generation with color conditioning
+- `v4` – pixel-space diffusion baseline
+- `v5` – latest experimental code
+
+Each folder contains a standalone `model_train_test.py` and example outputs.
