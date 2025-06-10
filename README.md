@@ -4,6 +4,18 @@ A class-conditional generative modeling framework combining Variational Autoenco
 
 [DEEPWIKI](https://deepwiki.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion)[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ynyeh0221/Oxford-102-Flower-GAN-VAE-latent-diffusion)
 
+## Table of Contents
+
+- [Features](#features)
+- [Dataset](#dataset)
+- [Training](#training)
+- [Output](#output)
+- [Getting Started](#getting-started)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Repository Structure](#repository-structure)
+- [License](#license)
+
 ## Features
 
 ### VAE with Enhanced Architecture
