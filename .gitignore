@@ -1,0 +1,17 @@
+# Ignore output artifacts and checkpoints
+output/
+results/
+*.pt
+*.png
+*.gif
+*.jpg
+__pycache__/
+.ipynb_checkpoints/
+
+# Ignore Python bytecode
+*.pyc
+
+# Ignore environment files
+.env
+.venv
+

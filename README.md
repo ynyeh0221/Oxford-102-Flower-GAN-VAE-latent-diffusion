@@ -107,3 +107,7 @@ pip install torch torchvision scikit-learn matplotlib tqdm imageio
 - `v5` – latest experimental code
 
 Each folder contains a standalone `model_train_test.py` and example outputs.
+
+## License
+
+This project is licensed under the terms of the [MIT License](LICENSE).
